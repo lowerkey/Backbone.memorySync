@@ -49,35 +49,70 @@ MemoryStore = (function() {
   return MemoryStore;
 })();
 Backbone.memorySync = function(method, model, options) {
-  var result, store;
+  var resp, store, syncDfd, errorMessage;
   store = model.store || model.collection.store;
+  syncDfd = $.Deferred && $.Deferred();
   if (!store) {
     console.warn("[BACKBONE-MEMORY] model without store object -> ", model);
     return;
   }
-  result = (function() {
+  
+  try {
+
     switch (method) {
       case "read":
-        if (model.id) {
-          return store.find(model);
-        } else {
-          return store.findAll(model);
-        }
+        resp = model.id != undefined ? store.find(model) : store.findAll();
         break;
       case "create":
-        return store.create(model);
+        resp = store.create(model);
+        break;
       case "update":
-        return store.update(model);
+        resp = store.update(model);
+        break;
       case "delete":
-        return store.destroy(model);
-      default:
-        return nil;
+        resp = store.destroy(model);
+        break;
     }
-  })();
-  if (result) {
-    return options.success(result);
+
+  } catch(error) {
+    if (error.code === DOMException.QUOTA_EXCEEDED_ERR && window.localStorage.length === 0)
+      errorMessage = "Private browsing is unsupported";
+    else
+      errorMessage = error.message;
   }
+
+  if (resp) {
+    if (options && options.success)
+      if (Backbone.VERSION === "0.9.10") {
+        options.success(model, resp, options);
+      } else {
+        options.success(resp);
+      }
+    if (syncDfd)
+      syncDfd.resolve(resp);
+
+  } else {
+    errorMessage = errorMessage ? errorMessage
+                                : "Record Not Found";
+    
+    if (options && options.error)
+      if (Backbone.VERSION === "0.9.10") {
+        options.error(model, errorMessage, options);
+      } else {
+        options.error(errorMessage);
+      }
+      
+    if (syncDfd)
+      syncDfd.reject(errorMessage);
+  }
+  
+  // add compatibility with $.ajax
+  // always execute callback for success and error
+  if (options && options.complete) options.complete(resp);
+
+  return syncDfd && syncDfd.promise();
 };
+
 window.Store = MemoryStore;
 Backbone.ajaxSync = Backbone.sync;
 Backbone.sync = Backbone.memorySync;
